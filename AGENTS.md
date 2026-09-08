@@ -1,6 +1,6 @@
 # CaptionWeave assistant instructions
 
-Read [README.md](README.md) for the CLI contract and [docs/translation-exchange.md](docs/translation-exchange.md) before translating. These instructions apply to any assistant that can execute local commands and read and write files.
+Read the [usage guide](docs/usage.md) for the CLI contract and [docs/translation-exchange.md](docs/translation-exchange.md) before translating. These instructions apply to any assistant that can execute local commands and read and write files.
 
 ## Transcription and translation
 

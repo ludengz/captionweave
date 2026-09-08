@@ -44,7 +44,7 @@ For changes to recognition or media alignment, add a small real CPU or GPU smoke
 - Keep model-specific execution behind the backend interface. Read [docs/architecture.md](docs/architecture.md) before adding an adapter.
 - Keep translations and media-specific options in job data or command arguments. Avoid per-recording scripts or hard-coded language defaults.
 - Preserve existing outputs through backups and the publication recovery mechanism. Do not describe per-file replacement as a filesystem-wide atomic transaction.
-- Update [README.md](README.md) and the [translation exchange documentation](docs/translation-exchange.md) when the public contract changes.
+- Update the [usage guide](docs/usage.md) and the [translation exchange documentation](docs/translation-exchange.md) when the public contract changes.
 
 ## Data hygiene and reviews
 
