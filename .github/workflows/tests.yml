@@ -1,0 +1,102 @@
+name: Tests and release audit
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install FFmpeg on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg on macOS
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[asr,test]"
+      - name: Test synthetic workflows
+        run: python -m unittest discover -s tests -v
+      - name: Inspect environment without loading models
+        run: captionweave doctor
+      - name: Check publishable source
+        run: python scripts/check_release.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Install without recognition dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Verify optional recognition dependencies
+        run: python -m unittest discover -s tests -v
+      - run: python -m build
+      - name: Audit wheel and source distribution
+        run: >-
+          python -c "import pathlib, subprocess, sys;
+          paths = sorted(pathlib.Path('dist').iterdir());
+          subprocess.run([sys.executable, 'scripts/check_release.py',
+          *[arg for p in paths for arg in ('--archive', str(p))]], check=True)"
+      - name: Verify wheel and source distribution installations
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+
+          checkout = Path.cwd().resolve()
+          environment = os.environ.copy()
+          environment.pop("PYTHONPATH", None)
+          environment.pop("PYTHONHOME", None)
+          for pattern in ("*.whl", "*.tar.gz"):
+              archives = sorted((checkout / "dist").glob(pattern))
+              assert len(archives) == 1, f"Expected one {pattern}: {archives}"
+              archive = archives[0].resolve()
+              with tempfile.TemporaryDirectory(prefix="captionweave-install-", dir=os.environ["RUNNER_TEMP"]) as temporary:
+                  working = Path(temporary).resolve()
+                  assert not working.is_relative_to(checkout), working
+                  virtualenv = working / "venv"
+                  python = virtualenv / "bin" / "python"
+                  command = virtualenv / "bin" / "captionweave"
+                  options = {"cwd": working, "env": environment, "check": True}
+                  print(f"Verifying {archive.name}", flush=True)
+                  subprocess.run([sys.executable, "-I", "-m", "venv", str(virtualenv)], **options)
+                  subprocess.run([str(python), "-I", "-m", "pip", "install", str(archive)], **options)
+                  subprocess.run([
+                      str(python), "-I", "-c",
+                      "import captionweave, pathlib, sys; "
+                      "module = pathlib.Path(captionweave.__file__).resolve(); "
+                      "assert module.is_relative_to(pathlib.Path(sys.prefix).resolve()), module; "
+                      "print(module)",
+                  ], **options)
+                  subprocess.run([str(command), "--help"], **options)
+                  subprocess.run([str(command), "doctor"], **options)
+          PY

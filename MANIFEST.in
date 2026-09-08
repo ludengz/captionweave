@@ -1,0 +1,13 @@
+include .gitignore README.md AGENTS.md LICENSE CONTRIBUTING.md SECURITY.md
+recursive-include src *.py
+recursive-include tests *.py
+recursive-include scripts *.py
+recursive-include docs *.md
+prune .captionweave
+prune media
+prune outputs
+prune jobs
+prune .venv
+prune build
+prune dist
+global-exclude *.py[cod] .DS_Store
