@@ -29,7 +29,7 @@ class SubtitleRegressionTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
 
     def make_job(self, name="job", source=None, segments=None):
         job = self.root / name
@@ -327,17 +327,29 @@ class SubtitleRegressionTests(unittest.TestCase):
         contender = context.Process(target=_render_competing,
                                     args=(str(second), str(output), entered, release, results, False))
         publisher.start()
-        self.assertTrue(entered.wait(15), "first publisher did not acquire the output lock")
-        contender.start()
-        contender.join(15)
-        self.assertFalse(contender.is_alive(), "contending publisher blocked instead of failing")
-        contender_result = results.get(timeout=5)
-        self.assertEqual(contender_result[0:2], ("error", "RuntimeError"))
-        release.set()
-        publisher.join(15)
-        self.assertFalse(publisher.is_alive(), "first publisher did not finish")
-        publisher_result = results.get(timeout=5)
-        self.assertEqual(publisher_result[0], "ok")
+        try:
+            self.assertTrue(entered.wait(15), "first publisher did not acquire the output lock")
+            contender.start()
+            contender.join(15)
+            self.assertFalse(contender.is_alive(), "contending publisher blocked instead of failing")
+            contender_result = results.get(timeout=5)
+            self.assertEqual(contender_result[0:2], ("error", "RuntimeError"))
+            release.set()
+            publisher.join(15)
+            self.assertFalse(publisher.is_alive(), "first publisher did not finish")
+            publisher_result = results.get(timeout=5)
+            self.assertEqual(publisher_result[0], "ok")
+        finally:
+            release.set()
+            for process in (publisher, contender):
+                if process.pid is not None:
+                    process.join(5)
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(5)
+                    process.close()
+            results.close()
+            results.join_thread()
 
 
 if __name__ == "__main__":

@@ -304,7 +304,7 @@ class InputTests(unittest.TestCase):
     def test_same_stem_containers_and_directories_cannot_clobber_outputs(self):
         from captionweave.cli import default_output
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             sources = [root / "a/movie.mp4", root / "a/movie.mkv", root / "b/movie.mp4"]
             outputs = [default_output(p, sources, "zh", root / "out") for p in sources]
             self.assertEqual(len(set(outputs)), 3)
@@ -312,7 +312,7 @@ class InputTests(unittest.TestCase):
     def test_directory_expansion_ignores_cache_and_duplicate_inputs(self):
         from captionweave.cli import expand_inputs
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             (root / "movie.mp4").touch()
             (root / "jobs").mkdir()
             (root / "jobs/aligned.wav").touch()

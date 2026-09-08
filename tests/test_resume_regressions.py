@@ -13,7 +13,7 @@ class ResumeMediaStatRegressionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.source = self.root / "source.wav"
         with wave.open(str(self.source), "wb") as wav:
             wav.setparams((1, 2, 16000, 0, "NONE", "not compressed"))

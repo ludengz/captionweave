@@ -30,12 +30,12 @@ class LiteralInputTests(unittest.TestCase):
 class OutputAllocationTests(unittest.TestCase):
     def test_default_outputs_use_the_current_working_directory(self):
         with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp):
-            source = Path(temp) / "media" / "movie.mp4"
-            self.assertEqual(default_output(source, [source], "en"), Path(temp) / "outputs" / "movie.en.srt")
+            source = Path(temp).resolve() / "media" / "movie.mp4"
+            self.assertEqual(default_output(source, [source], "en"), Path(temp).resolve() / "outputs" / "movie.en.srt")
 
     def test_batch_outputs_remain_unique_after_container_and_stem_collisions(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             sources = [root / "movie.mp4", root / "movie.mkv", root / "movie.mp4.mkv"]
             outputs = default_outputs(sources, "zh", root / "out")
             self.assertEqual(len(set(outputs.values())), len(sources))
@@ -46,7 +46,7 @@ class OutputAllocationTests(unittest.TestCase):
 
     def test_batch_outputs_remain_unique_after_clip_and_truncation(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             prefix = "a" * 200
             sources = [root / f"{prefix}1.mp4", root / f"{prefix}2.mkv"]
             outputs = default_outputs(sources, "zh", root / "out", start=10, duration=20)
@@ -55,7 +55,7 @@ class OutputAllocationTests(unittest.TestCase):
 
     def test_single_long_sources_keep_a_stable_digest_when_truncated(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             prefix = "a" * 200
             first, second = root / f"{prefix}1.mp4", root / f"{prefix}2.mp4"
             first_output = default_output(first, [first], "zh")
@@ -71,7 +71,7 @@ class CliLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.original_directory = Path.cwd()
         os.chdir(self.root)
         self.addCleanup(os.chdir, self.original_directory)

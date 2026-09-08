@@ -65,10 +65,7 @@ def job_lock(job):
     job.mkdir(parents=True, exist_ok=True)
     with (job / ".lock").open("a+b") as handle:
         handle.seek(0)
-        if not handle.read(1):
-            handle.write(b"0")
-            handle.flush()
-        handle.seek(0)
+        # Windows can lock past EOF; reading an already-locked byte would fail.
         try:
             if os.name == "nt":
                 import msvcrt
