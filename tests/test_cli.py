@@ -31,7 +31,7 @@ class OutputAllocationTests(unittest.TestCase):
     def test_default_outputs_use_the_current_working_directory(self):
         with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp):
             source = Path(temp).resolve() / "media" / "movie.mp4"
-            self.assertEqual(default_output(source, [source], "en"), Path(temp).resolve() / "outputs" / "movie.en.srt")
+            self.assertEqual(default_output(source, [source], "en").resolve(), Path(temp).resolve() / "outputs" / "movie.en.srt")
 
     def test_batch_outputs_remain_unique_after_container_and_stem_collisions(self):
         with tempfile.TemporaryDirectory() as temp:
