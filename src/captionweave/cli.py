@@ -6,10 +6,12 @@ import json
 import sys
 from pathlib import Path
 
-from captionweave.subtitles import export_requests, import_response, language_tag, load_transcript, render_job
+from captionweave.subtitles import (export_requests, import_response, language_tag, load_transcript,
+                                   render_job, select_review_segments)
 from captionweave.backends import create_backend, diagnostics, prepare_runtime
 from captionweave.core import (MEDIA_EXTENSIONS, atomic_json, digest, job_lock, probe_media,
                              read_json, transcribe_media)
+from captionweave.recheck import load_recheck_evidence, recheck_audio, window_evidence
 
 
 def expand_inputs(values, recursive=False, work_dir=None):
@@ -132,6 +134,7 @@ def build_parser():
     export.add_argument("--target-language", "--target", dest="target", type=language_tag, required=True)
     export.add_argument("--batch-size", type=int, default=60)
     export.add_argument("--max-chars", type=int, default=6000)
+    export.add_argument("--ids", nargs="+", help="Re-export these source IDs, including accepted translations")
     ingest = commands.add_parser("import", help="Validate and merge a model-written JSON response")
     ingest.add_argument("job", type=Path)
     ingest.add_argument("responses", nargs="+", type=Path)
@@ -146,9 +149,23 @@ def build_parser():
     render.add_argument("--width", type=int, help="Display columns per line; wide characters count as two (default: 48)")
     review = commands.add_parser("review", help="Inspect uncertain segments, word timing and alternate ASR")
     review.add_argument("job", type=Path)
-    review.add_argument("--ids", nargs="*")
+    review.add_argument("--ids", nargs="+")
+    review.add_argument("--target-language", "--target", dest="target", type=language_tag,
+                        help="Include unresolved translations (default: job target)")
     review.add_argument("--offset", type=int, default=0)
     review.add_argument("--limit", type=int, default=20)
+    recheck = commands.add_parser("recheck", help="Re-recognize unresolved speech with context and optional gain")
+    recheck.add_argument("job", type=Path)
+    recheck.add_argument("--ids", nargs="+", help="Source IDs; defaults to unresolved translations or pending ASR warnings")
+    recheck.add_argument("--target-language", "--target", dest="target", type=language_tag,
+                         help="Export review translations in this language (default: job target, if any)")
+    recheck.add_argument("--language", type=language_tag, help="Override the source language for this recheck")
+    recheck.add_argument("--model", help="Override the job's ASR model")
+    recheck.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
+    recheck.add_argument("--compute-type")
+    recheck.add_argument("--offline", action="store_true", default=None, help="Use cached models only (inherits job setting)")
+    recheck.add_argument("--context", type=float, default=5, help="Surrounding audio in seconds (0-15, default: 5)")
+    recheck.add_argument("--gain-db", type=float, default=9, help="Maximum gain without clipping (0-18; 0 disables)")
     commands.add_parser("doctor", help="Show tools and ASR package versions without loading the model runtime")
     return parser
 
@@ -205,9 +222,36 @@ def run_inputs(args):
     return {"results": results}, code
 
 
+def run_recheck(args, runtime_argv=None):
+    manifest = read_json(args.job / "manifest.json")
+    transcript = load_transcript(args.job)
+    target = args.target or manifest.get("target_language")
+    selected = select_review_segments(args.job, target, args.ids)
+    if not selected:
+        return {"status": "no_candidates", "selected_ids": [], "requests": []}, 0
+    saved_options = manifest.get("identity", {}).get("options", {})
+    language = args.language or transcript["language"]
+    if language in {"und", "auto"}:
+        raise ValueError("Specify --language for speech whose source language is unknown")
+    options = {"backend": saved_options.get("backend", "faster-whisper"),
+               "model": args.model or saved_options.get("model", "large-v3"), "language": language,
+               "device": args.device, "compute_type": args.compute_type,
+               "offline": saved_options.get("offline", False) if args.offline is None else args.offline}
+    if runtime_argv is not None:
+        prepare_runtime(options["backend"], options["device"], runtime_argv)
+    with contextlib.redirect_stdout(sys.stderr):
+        result = recheck_audio(args.job, transcript, selected, options, args.context, args.gain_db)
+    ids = [row["id"] for row in selected]
+    requests = export_requests(args.job, target, ids=ids) if target else []
+    return {**result, "status": "translation_required" if target else "review_required",
+            "job": str(args.job), "selected_ids": ids,
+            "requires_replace": any("previous_translation" in row for row in selected),
+            "requests": [str(path) for path in requests]}, 3 if target else 0
+
+
 def main(argv=None):
     values = list(sys.argv[1:] if argv is None else argv)
-    commands = {"run", "export", "import", "render", "review", "doctor", "-h", "--help"}
+    commands = {"run", "export", "import", "render", "review", "recheck", "doctor", "-h", "--help"}
     if values and values[0] not in commands:
         values.insert(0, "run")
     args = build_parser().parse_args(values)
@@ -224,7 +268,7 @@ def main(argv=None):
                 raise ValueError(f"No completed transcript in {args.job}")
             with job_lock(args.job):
                 if args.command == "export":
-                    paths = export_requests(args.job, args.target, args.batch_size, args.max_chars)
+                    paths = export_requests(args.job, args.target, args.batch_size, args.max_chars, args.ids)
                     result = {"status": "translation_required" if paths else "ready_to_render", "requests": [str(p) for p in paths]}
                 elif args.command == "import":
                     remaining = None
@@ -247,13 +291,21 @@ def main(argv=None):
                         output = output_for_target(output, manifest.get("target_language"), args.target)
                     result = render_job(args.job, output, target, args.font, args.size, args.width,
                                         unclear_text=args.unclear_text)
+                elif args.command == "recheck":
+                    result, code = run_recheck(args, values if argv is None else None)
                 else:
                     transcript = load_transcript(args.job)
-                    rows = [r for r in transcript["segments"] if r["id"] in args.ids] if args.ids else [r for r in transcript["segments"] if r.get("flags")]
+                    manifest_path = args.job / "manifest.json"
+                    saved_target = read_json(manifest_path).get("target_language") if manifest_path.exists() else None
+                    rows = select_review_segments(args.job, args.target or saved_target, args.ids)
                     if args.offset < 0 or args.limit < 1:
                         raise ValueError("Review offset must be nonnegative and limit positive")
                     chosen = rows[args.offset:args.offset + args.limit]
-                    result = {"total": len(rows), "segments": chosen, "alternatives": [r for r in transcript.get("alternatives", [])
+                    rechecks = load_recheck_evidence(args.job, transcript)
+                    alternatives = transcript.get("alternatives", []) + rechecks
+                    result = {"total": len(rows), "segments": chosen,
+                        "recheck_context": window_evidence(rechecks, [(r["start"], r["end"]) for r in chosen]),
+                        "alternatives": [r for r in alternatives
                         if any(min(r["end"], other["end"]) > max(r["start"], other["start"]) for other in chosen)]}
         print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
         return code

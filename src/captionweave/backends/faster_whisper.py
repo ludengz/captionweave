@@ -118,12 +118,24 @@ class FasterWhisperBackend:
             rows.append(row)
         return rows
 
-    def block(self, audio, offset):
+    def _decode_window(self, audio, offset):
+        segments, _ = self.model.transcribe(
+            audio, language=self.language, vad_filter=False, beam_size=5, word_timestamps=True,
+            condition_on_previous_text=False, temperature=(0.0, 0.2), hallucination_silence_threshold=2.0)
+        return self.records(segments, offset)
+
+    def _prepare_audio(self, audio):
         import numpy as np
         audio = np.asarray(audio, dtype=np.float32)
         if len(audio) < SAMPLE_RATE // 10 or np.max(np.abs(audio)) < 1e-5:
-            return {"segments": [], "alternatives": [], "digital_silence": True, "language": self.language}
+            return None
         self.load()
+        return audio
+
+    def block(self, audio, offset):
+        audio = self._prepare_audio(audio)
+        if audio is None:
+            return {"segments": [], "alternatives": [], "digital_silence": True, "language": self.language}
         segments, info = self.pipeline.transcribe(
             audio, language=self.language, vad_filter=False,
             clip_timestamps=clip_windows(len(audio) / SAMPLE_RATE), batch_size=self.options["batch_size"],
@@ -137,10 +149,13 @@ class FasterWhisperBackend:
                 left, right = index * 30, min((index + 1) * 30, len(audio) / SAMPLE_RATE)
                 if right - left < 0.1:
                     continue
-                check, _ = self.model.transcribe(
-                    audio[round(left * SAMPLE_RATE):round(right * SAMPLE_RATE)], language=self.language,
-                    vad_filter=False, beam_size=5, word_timestamps=True, condition_on_previous_text=False,
-                    temperature=(0.0, 0.2), hallucination_silence_threshold=2.0)
-                alternatives.extend(self.records(check, offset + left))
+                alternatives.extend(self._decode_window(
+                    audio[round(left * SAMPLE_RATE):round(right * SAMPLE_RATE)], offset + left))
         return {"segments": primary, "alternatives": alternatives, "digital_silence": False,
                 "language": self.language}
+
+    def recheck(self, audio, offset):
+        audio = self._prepare_audio(audio)
+        if audio is None:
+            return []
+        return self._decode_window(audio, offset)

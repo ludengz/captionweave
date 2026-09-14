@@ -28,6 +28,7 @@ The internal adapter interface is:
 | Member | Contract |
 | --- | --- |
 | `block(audio, offset)` | Recognize normalized mono 16 kHz samples supplied as a standard-library `array('f')`, returning a normalized block record; `offset` is seconds on the original playback timeline |
+| `recheck(audio, offset)` | Optional contextual recognition of at most 30 seconds of the same normalized samples; returns alternate segment records with playback offsets and word timing |
 | `language` | Mutable source-language state; initialized from the requested language or reset for automatic detection at the start of each input |
 | `actual_device` | Device actually used, recorded as execution metadata when available |
 | `identity()` | Optional JSON dictionary containing at least `name`, used to distinguish implementations and relevant versions in the recognition cache |
@@ -40,15 +41,19 @@ Adapters must not publish files, assign final source IDs, translate text, or man
 
 The faster-whisper adapter processes full-coverage windows without VAD-based removal of the playback timeline. Accurate mode gathers an additional recognition pass for flagged windows. Automatic language detection establishes language state for a recording; it does not promise independent language detection for every utterance.
 
+`recheck.py` orchestrates bounded contextual recognition from a completed job's saved aligned audio. It merges nearby review ranges, splits spans into overlapping windows of at most 30 seconds, and compares original samples with an optional gain variant capped to avoid clipping. Window selection, gain, checkpoint storage, and evidence validation use the standard library; model execution remains in the adapter's optional `recheck` method. A backend without that method still supports ordinary recognition and fails explicitly if contextual rechecks are requested.
+
+Recheck evidence has its own revision and binds the complete transcript digest, saved audio digest, options, backend identity, and window. Individual completed passes resume without inference. Export and review only use evidence matching the current transcript and audio, and reject corrupt checkpoints. Rechecks do not rewrite the primary transcript, assign new source IDs, or mutate translations. The existing primary recognition algorithm and cache identity are unchanged.
+
 ## Future Apple acceleration
 
 MLX, WhisperKit, and whisper.cpp are possible future adapter implementations. None is implemented or selected automatically today. Adding one requires more than replacing a model call: it must normalize timing and word evidence, expose device and cache identity, honor source-language and offline choices, preserve resume behavior, and pass shared contract tests plus a real runtime smoke test. Platform-specific execution should stay within the adapter.
 
 ## Translation exchange
 
-`subtitles.py` exports pending stable IDs with source text, nearby context, and available alternate recognition. Target tags are canonicalized for export and storage. Each response must echo the exported identity metadata exactly.
+`subtitles.py` exports pending stable IDs with source text, nearby context, and available alternate recognition, including overlapping alternatives for unflagged speech. Selected-ID export can revisit accepted items with their previous translation and contextual recheck evidence. Target tags are canonicalized for export and storage. Each response must echo the exported identity metadata exactly.
 
-The source digest binds the language and ordered source IDs/text. The request digest binds the packet. Import requires exact batch coverage and accepts only translated, unclear, or omitted dispositions. The target ledger stores accepted responses and evidence-based corrections without rewriting recognition data. See the [exchange contract](translation-exchange.md).
+The source digest binds the language and ordered source IDs/text. The request digest binds the packet. Import requires exact batch coverage and accepts translated, partial, unclear, or omitted dispositions. Partial translations retain supported content with explicit uncertainty markers and reasons. The target ledger stores accepted responses and evidence-based corrections without rewriting recognition data; deliberate replacements preserve the previous ledger before updating it. See the [exchange contract](translation-exchange.md).
 
 No model-provider client, credential lookup, translation API, or nested coding-agent process is part of this translation path. The assistant in the current conversation performs the translation and uses the CLI for validation.
 
@@ -58,7 +63,7 @@ Rendering selects source text or a complete target ledger, applies accepted corr
 
 Publication validates the output bundle before writing: it must remain outside the job directory and must not overwrite source media. Existing artifacts receive backups. New files are staged and replaced individually with a journal supporting rollback and recovery. A publication lock coordinates writers to the same output directory. Atomicity applies to each file replacement, not simultaneous visibility of the complete bundle; unrelated readers can observe an intermediate mix of generations.
 
-The quality report records structural checks and review signals. It makes no claim of a manual listening audit. Unknown speech, hallucinations, missed dialogue, language changes, and timing ambiguity remain possible even when validation succeeds.
+The quality report records structural checks, separate partial/unclear source counts, and review signals. Merged or split captions retain per-source translation statuses and reasons. It makes no claim of a manual listening audit. Unknown speech, hallucinations, missed dialogue, language changes, and timing ambiguity remain possible even when validation succeeds.
 
 ## Public source and private runtime data
 

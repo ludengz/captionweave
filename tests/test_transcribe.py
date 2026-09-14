@@ -67,6 +67,132 @@ class TranslationTests(unittest.TestCase):
         rows = translated_segments(self.job, "zh")
         self.assertEqual([r["text"] for r in rows], ["你好。", "谢谢。"])
 
+    def test_unflagged_speech_exports_overlapping_alternate_evidence(self):
+        alternate = {"start": 1.1, "end": 1.9, "text": "こんばんは", "flags": []}
+        self.transcript["alternatives"] = [
+            alternate,
+            {"start": 2.0, "end": 3.0, "text": "隣の発話", "flags": []},
+        ]
+        (self.job / "transcript.json").write_text(json.dumps(self.transcript), encoding="utf-8")
+        request, response = self.request_and_response()
+        self.assertEqual(request["items"][0].get("alternatives"), [alternate])
+        self.assertFalse(request["items"][1].get("alternatives"))
+        from captionweave.subtitles import import_response, translated_segments
+        import_response(self.job, self.save_response(response))
+        self.assertEqual(translated_segments(self.job, "zh")[0]["text"], "你好。")
+
+
+    def test_partial_translation_keeps_known_words_and_reports_uncertainty(self):
+        from captionweave.subtitles import import_response, render_job, select_review_segments
+        _, response = self.request_and_response()
+        response["translations"][1].update(
+            text="请把[?]递给我。", status="partial", reason="The object is unresolved")
+        import_response(self.job, self.save_response(response))
+        report = render_job(self.job, self.output / "partial.zh.srt", "zh")
+        self.assertEqual((report["partial_segments"], report["unclear_segments"], report["uncertain_segments"]), (1, 0, 1))
+        self.assertTrue(report["review_recommended"])
+        self.assertIn("请把[?]递给我。", (self.output / "partial.zh.srt").read_text(encoding="utf-8"))
+        self.assertEqual([r["id"] for r in select_review_segments(self.job, "zh")], ["s000001"])
+
+
+    def test_partial_requires_reason_marker_and_some_known_text(self):
+        from captionweave.subtitles import import_response
+        _, response = self.request_and_response()
+        for change in [dict(text="你好", reason="Missing marker"), dict(text="[?]", reason="No known text"),
+                       dict(text="你好[?]", reason=""), dict(text=None, reason="Missing text")]:
+            bad = copy.deepcopy(response)
+            bad["translations"][0].update(status="partial", **change)
+            with self.assertRaises(ValueError):
+                import_response(self.job, self.save_response(bad))
+        self.assertFalse((self.job / "translations/zh/ledger.json").exists())
+
+    def test_partial_translation_renders_custom_marker_without_changing_ledger(self):
+        from captionweave.subtitles import import_response, render_job
+        packet, response = self.request_and_response()
+        self.assertEqual(packet["uncertainty_marker"], "[?]")
+        response["translations"][0].update(text="谢谢 [?]", status="partial", reason="Unresolved suffix.")
+        import_response(self.job, self.save_response(response))
+        ledger = self.job / "translations/zh/ledger.json"
+        before = ledger.read_bytes()
+        output = self.output / "partial.zh.srt"
+        render_job(self.job, output, "zh", unclear_text="[inaudible]")
+        self.assertIn("谢谢 [inaudible]", output.read_text(encoding="utf-8"))
+        self.assertEqual(ledger.read_bytes(), before)
+
+    def test_failed_replacement_backup_leaves_accepted_ledger_unchanged(self):
+        from captionweave.subtitles import import_response
+        _, response = self.request_and_response()
+        import_response(self.job, self.save_response(response))
+        ledger = self.job / "translations/zh/ledger.json"
+        before = ledger.read_bytes()
+        response["translations"][0]["text"] = "非常感谢。"
+        with patch("captionweave.subtitles.atomic_json", side_effect=OSError("Backup failed")):
+            with self.assertRaisesRegex(OSError, "Backup failed"):
+                import_response(self.job, self.save_response(response), replace=True)
+        self.assertEqual(ledger.read_bytes(), before)
+
+
+    def test_uncertainty_cannot_be_hidden_in_fully_translated_status(self):
+        from captionweave.subtitles import import_response
+        _, response = self.request_and_response()
+        response["translations"][0]["text"] = "谢谢[?]"
+        with self.assertRaisesRegex(ValueError, "partial"):
+            import_response(self.job, self.save_response(response))
+
+
+    def test_merged_caption_retains_each_sources_uncertainty_status(self):
+        from captionweave.subtitles import import_response, render_job
+        self.transcript["segments"][1].update(start=1.6, end=2.4)
+        (self.job / "transcript.json").write_text(json.dumps(self.transcript), encoding="utf-8")
+        _, response = self.request_and_response()
+        response["translations"][0].update(text="谢谢[?]", status="partial", reason="Unresolved suffix")
+        import_response(self.job, self.save_response(response))
+        report = render_job(self.job, self.output / "merged.zh.srt", "zh")
+        rows = json.loads((self.output / "merged.zh.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["subtitle_count"], 1)
+        self.assertEqual(rows[0]["translation_status"], "partial")
+        self.assertEqual(rows[0]["translation_statuses"], {"s000001": "translated", "s000002": "partial"})
+        self.assertEqual(rows[0]["translation_reasons"], {"s000002": "Unresolved suffix"})
+
+
+    def test_selected_export_revisits_accepted_ids_without_changing_ledger(self):
+        from captionweave.subtitles import export_requests, import_response
+        _, response = self.request_and_response()
+        import_response(self.job, self.save_response(response))
+        ledger = self.job / "translations/zh/ledger.json"
+        before = ledger.read_bytes()
+        packet = json.loads(export_requests(self.job, "zh", ids=["s000002"])[0].read_text(encoding="utf-8"))
+        self.assertEqual([r["id"] for r in packet["items"]], ["s000002"])
+        self.assertEqual(packet["items"][0]["previous_translation"]["text"], "谢谢。")
+        self.assertEqual(ledger.read_bytes(), before)
+        for ids in [[], ["s000002", "s000002"], ["s999999"]]:
+            with self.assertRaises(ValueError):
+                export_requests(self.job, "zh", ids=ids)
+
+
+    def test_selected_export_supplies_neighbors_of_each_nonadjacent_item(self):
+        from captionweave.subtitles import export_requests
+        self.transcript["segments"] = [
+            {"id": f"s{i:06}", "start": i, "end": i + 0.5, "text": f"Speech {i}", "flags": []}
+            for i in range(1, 9)]
+        (self.job / "transcript.json").write_text(json.dumps(self.transcript), encoding="utf-8")
+        packet = json.loads(export_requests(self.job, "zh", ids=["s000001", "s000006"])[0].read_text(encoding="utf-8"))
+        self.assertEqual([r["id"] for r in packet["context"]],
+                         ["s000002", "s000003", "s000004", "s000005", "s000007", "s000008"])
+
+
+    def test_deliberate_replacement_preserves_previous_ledger(self):
+        from captionweave.subtitles import import_response
+        _, response = self.request_and_response()
+        import_response(self.job, self.save_response(response))
+        before = json.loads((self.job / "translations/zh/ledger.json").read_text(encoding="utf-8"))
+        response["translations"][0]["text"] = "非常感谢。"
+        import_response(self.job, self.save_response(response), replace=True)
+        backups = list((self.job / "translations/zh/history").glob("*.json"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(json.loads(backups[0].read_text(encoding="utf-8")), before)
+
+
     def test_wrong_source_duplicate_or_missing_ids_are_rejected(self):
         from captionweave.subtitles import import_response
         _, response = self.request_and_response()

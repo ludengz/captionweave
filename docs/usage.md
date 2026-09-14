@@ -113,16 +113,19 @@ Inspect uncertain segments and their timing evidence:
 
 ```sh
 captionweave review JOB
+captionweave review JOB --target es
 captionweave review JOB --ids s000001 s000002
 ```
 
-Responses may include evidence-based source-text and timing corrections. Use `import --replace` only to deliberately correct an accepted response. The default marker for unresolved speech is `[?]`; customize it and the ASS font when rendering:
+Review includes partial/unclear translations in the requested or saved target, plus flagged source IDs without accepted translations. Explicit `--ids` can inspect any source segment, including resolved items. Responses may include evidence-based source-text and timing corrections. Use `import --replace` only to deliberately correct an accepted response; the previous ledger is preserved in `JOB/translations/TARGET/history/`. The default marker for unresolved speech is `[?]`; customize it and the ASS font when rendering:
 
 ```sh
 captionweave render JOB --unclear-text "[inaudible]" --font "sans-serif"
 ```
 
 Choose an installed font with glyph coverage for your output languages. `--width` sets an approximate display-column budget, defaulting to 48. CaptionWeave preserves logical Unicode text order; your subtitle player handles font fallback, shaping, and right-to-left display.
+
+When part of a phrase is clear, retain it with a `partial` translation and the request's `uncertainty_marker` at each unresolved span. `unclear` is for speech with no reliably recoverable meaning. Both dispositions remain review signals; quality reports count `partial_segments`, `unclear_segments`, and their combined `uncertain_segments`. `--unclear-text` changes the displayed marker in both partial and wholly unclear captions.
 
 Structural validation checks timing and translation completeness. It does not verify that every word is correct or that someone listened to the complete recording. `review_recommended: true` exposes uncertainty; it is not a command to rerun recognition until flags disappear. A silent recording may produce `status: "no_captions"`.
 
@@ -138,6 +141,26 @@ captionweave run lecture.mp4 --dry-run
 ```
 
 `--start` and `--duration` select seconds on the original playback timeline; output timestamps retain that timeline. `--audio-stream` selects a zero-based audio-stream index. `--mode accurate` also rechecks flagged audio windows; `--mode balanced` performs one full-coverage recognition pass. These modes trade additional recognition work for more evidence, without guaranteeing accuracy.
+
+## Contextual rechecks
+
+After importing an initial translation, gather one additional pass for unresolved items without restarting recognition:
+
+```sh
+captionweave recheck JOB --target es --offline
+captionweave recheck JOB --ids s000001 --language en --context 5 --gain-db 9
+captionweave review JOB --target es --ids s000001
+```
+
+`recheck` defaults to partial/unclear translations and flagged source IDs that have no accepted disposition. `--ids` selects specific IDs, including resolved ones. It uses the saved aligned audio, adds up to five seconds of context on each side by default, and divides long spans into overlapping windows of at most 30 seconds. It compares the original audio with a gain pass capped to prevent clipping; gains below 1 dB are skipped. Use `--gain-db 0` to disable gain or `--context` to choose 0–15 seconds. Gain supplies another reading; it does not remove noise or establish that speech was quiet.
+
+The source language and model default to the completed job; `--language` and `--model` override them. Unknown source language requires an explicit `--language`. `--device` defaults to `auto`, with CPU and CUDA supported; `--compute-type` can override the runtime choice. `--offline` inherits the job setting when omitted.
+
+Rechecks preserve the transcript, stable IDs, and accepted translations. Each original/gain pass is checkpointed separately, bound to the transcript, audio bytes, options, and backend identity. Repeating the same command resumes validated evidence; keep `JOB/aligned.wav` to collect or inspect that evidence. Alternate readings retain word timestamps and provenance. Neighboring speech in `recheck_context` is context to compare, not an automatic replacement for the selected phrase.
+
+With a requested or saved target, `recheck` exports requests for the selected IDs, including their previous translations, and exits with code 3 and `translation_required`. Review these requests and import complete responses; changed accepted items need `--replace`. Then render the target again. Without a target it saves source evidence and returns `review_required` with code 0; no translation language is assumed. No selected items returns `no_candidates` with code 0.
+
+Keep uncertainty explicit after one bounded review pass. Rechecks cannot add speech missing from the original source IDs; use a focused `run --start ... --duration ...` when that is necessary.
 
 Run `captionweave --help` or `captionweave COMMAND --help` for all options. Successful commands emit JSON. Exit code 1 indicates an operational error, 2 invalid CLI usage, and 130 an interruption. Check both the exit code and JSON status: `export` and `import` may report `translation_required` while succeeding with exit code 0.
 
