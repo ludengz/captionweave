@@ -97,6 +97,8 @@ class BlockASR(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockASR())
 from captionweave.cli import doctor
 from captionweave.core import transcribe_media
+from captionweave.core import read_json
+from captionweave.recheck import recheck_audio
 from captionweave.subtitles import render_job
 assert doctor()["cuda_runtime"] == "not_loaded"
 
@@ -106,6 +108,8 @@ class Engine:
     def block(self, audio, offset):
         return {"language": "en", "alternatives": [], "segments": [
             {"start": 0.1, "end": 0.4, "text": "Hello.", "flags": []}]}
+    def recheck(self, audio, offset):
+        return [{"start": offset + 0.1, "end": offset + 0.4, "text": "Hello.", "flags": []}]
 
 if shutil.which("ffmpeg") and shutil.which("ffprobe"):
     with tempfile.TemporaryDirectory() as temp:
@@ -117,6 +121,10 @@ if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         options = {"language": "auto", "start": 0, "duration": None, "audio_stream": 0}
         job = transcribe_media(source, root / "jobs", options, Engine())
         assert render_job(job, root / "output.srt")["status"] == "complete"
+        transcript = read_json(job / "transcript.json")
+        result = recheck_audio(job, transcript, transcript["segments"],
+                               {"language": "en", "model": "test"}, recognizer=Engine())
+        assert result["created_passes"] == 1
 '''
         environment = {**os.environ, "PYTHONPATH": str(source_root), "PYTHONDONTWRITEBYTECODE": "1"}
         result = subprocess.run([sys.executable, "-c", script], env=environment, capture_output=True, text=True)
@@ -203,6 +211,24 @@ class BackendBlockTests(unittest.TestCase):
         self.assertEqual(result["segments"][0]["flags"], ["low_confidence"])
         self.assertEqual(result["alternatives"], [])
         backend.model.transcribe.assert_not_called()
+
+    def test_contextual_recheck_accepts_standard_samples_and_preserves_word_timeline(self):
+        word = SimpleNamespace(start=0.25, end=0.75, word=" Hello", probability=0.9)
+        backend = self.backend([], language="en")
+        backend.model.transcribe.side_effect = None
+        backend.model.transcribe.return_value = (
+            iter([self.segment(0.25, 0.75, words=[word])]), SimpleNamespace(language="en"))
+        result = backend.recheck(array("f", [0.25]) * SAMPLE_RATE, 100.125)
+        self.assertEqual((result[0]["start"], result[0]["end"]), (100.375, 100.875))
+        self.assertEqual(result[0]["words"][0][:2], [100.375, 100.875])
+        self.assertFalse(backend.model.transcribe.call_args.kwargs["vad_filter"])
+        self.assertFalse(backend.model.transcribe.call_args.kwargs["condition_on_previous_text"])
+        backend.pipeline.transcribe.assert_not_called()
+
+    def test_contextual_recheck_skips_digital_silence_without_loading_model(self):
+        backend = FasterWhisperBackend(OPTIONS)
+        with patch.object(backend, "load", side_effect=AssertionError("Unexpected model load")):
+            self.assertEqual(backend.recheck(array("f", [0]) * SAMPLE_RATE, 120), [])
 
     def test_accurate_mode_rechecks_each_flagged_window_once_on_original_timeline(self):
         backend = self.backend([
