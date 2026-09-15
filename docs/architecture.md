@@ -21,7 +21,9 @@ The backend returns recognition evidence; job orchestration owns checkpoint stor
 
 ## Recognition adapter
 
-`captionweave.backends.create_backend(options)` selects the recognition backend. The only accepted backend name is currently `faster-whisper`, which is also the default when `options["backend"]` is omitted; unknown names fail explicitly. There is no configurable plugin registry. The implementation uses CPU or CUDA and loads recognition dependencies and the model only when recognition needs them. Base translation exchange and rendering do not require these optional dependencies.
+`captionweave.backends.create_backend(options)` accepts `auto`, `faster-whisper`, and `mlx-whisper`. Automatic selection uses MLX on native arm64 macOS 14+ unless CPU is requested; other Macs use faster-whisper CPU, while Linux/Windows retain faster-whisper CPU/CUDA. Explicit Metal selects MLX and validates the platform; macOS rejects CUDA without probing its runtime. The CLI records the concrete backend in job options before computing job identity. Existing Linux/Windows recognition options and faster-whisper cache identities stay compatible.
+
+There is no configurable plugin registry. Recognition dependencies and models are loaded lazily. Base translation exchange and rendering do not require them. `doctor` reports candidate backends and installed versions without importing GPU runtimes; model loading verifies the selected runtime separately.
 
 The internal adapter interface is:
 
@@ -35,7 +37,7 @@ The internal adapter interface is:
 
 A block record contains `segments`, `alternatives`, `digital_silence`, and `language`. Segments provide `start`, `end`, `text`, `words`, and `flags`; available confidence diagnostics may accompany them. Times in segments and words already include `offset`. Word records use `[start, end, text, probability]`. Alternate recognition uses the same timeline and segment representation, providing review evidence rather than silently replacing the primary transcript.
 
-The real adapter's identity includes `name`, `revision`, and versions of faster-whisper, CTranslate2, and NumPy. For an injected backend without `identity()`, the fallback uses its module-qualified class name, revision information, and empty dependency versions.
+Each adapter's identity includes `name`, `revision`, and relevant dependency versions. MLX also records the resolved model source so changes to short-name mapping affect cache identity. Model repository names and local directory names do not fingerprint mutable weights; use stable snapshots or `--restart` after replacing a model in place. For an injected backend without `identity()`, the fallback uses its module-qualified class name, revision information, and empty dependency versions.
 
 Adapters must not publish files, assign final source IDs, translate text, or manage target ledgers. Changes that can alter recognition results need an appropriate cache-identity change. Injected test backends can implement this interface without loading models or requiring a GPU. This is an internal extension seam, not a versioned third-party plugin API.
 
@@ -45,9 +47,15 @@ The faster-whisper adapter processes full-coverage windows without VAD-based rem
 
 Recheck evidence has its own revision and binds the complete transcript digest, saved audio digest, options, backend identity, and window. Individual completed passes resume without inference. Export and review only use evidence matching the current transcript and audio, and reject corrupt checkpoints. Rechecks do not rewrite the primary transcript, assign new source IDs, or mutate translations. The existing primary recognition algorithm and cache identity are unchanged.
 
-## Future Apple acceleration
+## Apple Silicon execution
 
-MLX, WhisperKit, and whisper.cpp are possible future adapter implementations. None is implemented or selected automatically today. Adding one requires more than replacing a model call: it must normalize timing and word evidence, expose device and cache identity, honor source-language and offline choices, preserve resume behavior, and pass shared contract tests plus a real runtime smoke test. Platform-specific execution should stay within the adapter.
+The MLX adapter consumes the same aligned audio arrays and processes non-overlapping windows of at most 30 seconds. It converts each slice to NumPy float32, requests word timestamps, and applies the original playback offset to both words and segments. Shared quality flags remain independent of the engine. Accurate mode collects additional readings for flagged windows, and contextual rechecks use the same adapter without rewriting the original source IDs.
+
+MLX inference runs inside `mlx.core.stream(mlx.core.gpu)`, including model loading. Startup evaluates a small GPU operation because the availability flag alone reports compiled Metal support, not usable hardware. The adapter fixes precision to float16, avoiding the upstream path-only global model cache's dtype ambiguity. It does not set the process-wide default device or use the upstream private cache directly. The pinned decoder has no beam search; it uses greedy decoding for primary windows and a bounded temperature fallback for rechecks.
+
+Hub models are resolved with `snapshot_download(local_files_only=offline)` and a config/weights allowlist. Existing local model directories need no Hub request. The adapter requires `config.json` and `weights.safetensors` or `weights.npz`, then passes an existing directory to the upstream loader so offline recognition cannot fall through to an implicit download. Known short names map to verified MLX repositories; other models require an explicit repository or MLX directory. CTranslate2 model directories are incompatible with this format.
+
+See [Apple Silicon setup and validation](apple-silicon.md). Ordinary macOS CI checks platform contracts and packaging; it is not evidence of real Metal ASR. WhisperKit and whisper.cpp adapters are not implemented.
 
 ## Translation exchange
 

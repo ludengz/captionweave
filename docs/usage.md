@@ -8,7 +8,7 @@ The workflow keeps playback timestamps, resumes validated recognition blocks, an
 
 - Python 3.11 or newer.
 - FFmpeg and ffprobe on `PATH` for media inspection and recognition.
-- The optional ASR dependencies for recognizing media: faster-whisper 1.2.1, CTranslate2 4.8.1, and NumPy.
+- The optional ASR dependencies for recognizing media: faster-whisper/CTranslate2 for CPU or CUDA, or MLX Whisper for Apple Silicon Metal.
 - A tool-capable assistant that can read and write local files for translation.
 
 From a source checkout, create a virtual environment:
@@ -38,7 +38,11 @@ captionweave doctor
 
 `python -m captionweave` is equivalent to the installed `captionweave` command. A base installation with `python -m pip install .` supports the translation exchange and rendering commands without installing a recognition model or NumPy. Recognition models may download on first use. `--offline` restricts recognition to already cached models.
 
-The current backend is faster-whisper on CPU or NVIDIA CUDA. `--device auto` chooses between those devices. CUDA requires a compatible runtime; `doctor` reports tool paths and package versions while leaving the CUDA runtime unloaded, so it does not prove that a full recognition run will succeed. Apple GPU acceleration is not implemented; see [architecture and backend boundaries](architecture.md).
+On Apple Silicon running macOS older than 14, install `.[cpu]` instead of `.[asr]` or `.[metal]`, then use `--device cpu`. The CPU extra omits MLX, whose current wheels require macOS 14+. It also works for a CPU-only installation on other platforms.
+
+`--backend auto` selects MLX/Metal on Apple Silicon with native arm64 Python and macOS 14+, faster-whisper/CPU on other Macs, and faster-whisper/CPU or NVIDIA CUDA elsewhere. `.[asr]` includes MLX dependencies on Apple Silicon as well as the CPU fallback. The smaller `.[metal]` extra installs only the Metal recognition stack. See the [Apple Silicon guide](apple-silicon.md) for setup and a hardware smoke test.
+
+Use `--device cpu` to force faster-whisper CPU with automatic backend selection, or `--device metal` to require MLX/Metal. Explicit `--backend faster-whisper` and `--backend mlx-whisper` select an engine directly. CUDA is rejected on macOS. Unsupported combinations fail with guidance; missing Metal support or dependencies do not silently fall back to CPU. `doctor` reports the selected backend and package versions while leaving GPU runtimes unloaded, so it does not prove that inference will succeed.
 
 ## Generate source-language subtitles
 
@@ -142,6 +146,8 @@ captionweave run lecture.mp4 --dry-run
 
 `--start` and `--duration` select seconds on the original playback timeline; output timestamps retain that timeline. `--audio-stream` selects a zero-based audio-stream index. `--mode accurate` also rechecks flagged audio windows; `--mode balanced` performs one full-coverage recognition pass. These modes trade additional recognition work for more evidence, without guaranteeing accuracy.
 
+MLX processes windows serially; `--batch-size` controls faster-whisper only. MLX currently accepts only the default precision or `--compute-type float16`. Its decoder uses greedy/sampling inference because the pinned MLX Whisper release does not implement beam search, so identical model names can yield different readings across backends.
+
 ## Contextual rechecks
 
 After importing an initial translation, gather one additional pass for unresolved items without restarting recognition:
@@ -154,7 +160,7 @@ captionweave review JOB --target es --ids s000001
 
 `recheck` defaults to partial/unclear translations and flagged source IDs that have no accepted disposition. `--ids` selects specific IDs, including resolved ones. It uses the saved aligned audio, adds up to five seconds of context on each side by default, and divides long spans into overlapping windows of at most 30 seconds. It compares the original audio with a gain pass capped to prevent clipping; gains below 1 dB are skipped. Use `--gain-db 0` to disable gain or `--context` to choose 0–15 seconds. Gain supplies another reading; it does not remove noise or establish that speech was quiet.
 
-The source language and model default to the completed job; `--language` and `--model` override them. Unknown source language requires an explicit `--language`. `--device` defaults to `auto`, with CPU and CUDA supported; `--compute-type` can override the runtime choice. `--offline` inherits the job setting when omitted.
+The source language, model, and backend default to the completed job; `--language`, `--model`, and `--backend` override them. Unknown source language requires an explicit `--language`. `--device` defaults to `auto`, with CPU/CUDA for faster-whisper and Metal for MLX; `--compute-type` follows the backend's precision support. `--offline` inherits the job setting when omitted. To review a job created on another platform using Apple GPU evidence, use `recheck JOB --backend mlx-whisper --device metal`; this preserves the original transcript and IDs.
 
 Rechecks preserve the transcript, stable IDs, and accepted translations. Each original/gain pass is checkpointed separately, bound to the transcript, audio bytes, options, and backend identity. Repeating the same command resumes validated evidence; keep `JOB/aligned.wav` to collect or inspect that evidence. Alternate readings retain word timestamps and provenance. Neighboring speech in `recheck_context` is context to compare, not an automatic replacement for the selected phrase.
 

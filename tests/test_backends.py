@@ -60,7 +60,8 @@ class BackendContractTests(unittest.TestCase):
         modules = {"ctranslate2": SimpleNamespace(get_cuda_device_count=lambda: 1),
                    "faster_whisper": SimpleNamespace(WhisperModel=whisper_model, BatchedInferencePipeline=lambda model: model)}
         backend = FasterWhisperBackend({**OPTIONS, "device": "auto", "compute_type": "int8_float16"})
-        with patch.dict(sys.modules, modules), patch("captionweave.backends.faster_whisper.configure_gpu_libraries"):
+        with patch.dict(sys.modules, modules), patch("captionweave.backends.faster_whisper.configure_gpu_libraries"), patch(
+                "captionweave.backends.faster_whisper.sys.platform", "linux"):
             backend.load()
             backend.load()
         self.assertEqual(len(calls), 1)
@@ -91,7 +92,7 @@ from pathlib import Path
 
 class BlockASR(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"numpy", "ctranslate2", "faster_whisper", "torch", "pyannote"}:
+        if fullname.split(".")[0] in {"numpy", "ctranslate2", "faster_whisper", "mlx", "mlx_whisper", "torch", "pyannote"}:
             raise AssertionError("Unexpected ASR import: " + fullname)
 
 sys.meta_path.insert(0, BlockASR())
@@ -328,6 +329,7 @@ class GpuRuntimeTests(unittest.TestCase):
                                       execve=Mock(side_effect=AssertionError("Unexpected process replacement")))
             retained, registered = [], set()
             with patch("captionweave.backends.faster_whisper.os", windows), patch(
+                    "captionweave.backends.faster_whisper.sys.platform", "win32"), patch(
                     "captionweave.backends.faster_whisper.DLL_HANDLES", retained), patch(
                     "captionweave.backends.faster_whisper.DLL_PATHS", registered), patch(
                     "captionweave.backends.faster_whisper.site.getsitepackages", return_value=[temp]), patch(

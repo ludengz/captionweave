@@ -310,6 +310,20 @@ class RecheckTests(unittest.TestCase):
         result = recheck_audio(self.job, self.transcript, rows, self.options, recognizer=engine)
         self.assertEqual((result["created_passes"], result["cached_passes"]), (2, 0))
 
+    def test_cli_can_recheck_an_existing_job_with_a_different_backend(self):
+        from captionweave.cli import main
+        before = (self.job / "transcript.json").read_bytes()
+        output = io.StringIO()
+        with patch("sys.platform", "darwin"), patch("platform.machine", return_value="arm64"), patch(
+                "platform.mac_ver", return_value=("14.0", ("", "", ""), "arm64")), patch(
+                "captionweave.recheck.create_backend", return_value=self.Engine()) as factory, contextlib.redirect_stdout(output):
+            code = main(["recheck", str(self.job), "--ids", "s000001", "--backend", "mlx-whisper",
+                         "--device", "metal", "--model", "tiny", "--compute-type", "float16"])
+        self.assertEqual(code, 0)
+        self.assertEqual(factory.call_args.args[0]["backend"], "mlx-whisper")
+        self.assertEqual(factory.call_args.args[0]["device"], "metal")
+        self.assertEqual((self.job / "transcript.json").read_bytes(), before)
+
     def test_corrected_timing_selects_the_review_window_and_exports_its_evidence(self):
         from captionweave.subtitles import export_requests, import_response, select_review_segments
         from captionweave.recheck import recheck_audio

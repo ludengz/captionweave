@@ -172,6 +172,18 @@ class CliLifecycleTests(unittest.TestCase):
         self.assertEqual(Path(result["results"][0]["job"]), self.root / ".captionweave" / "jobs" / "fake-job")
         self.assertTrue((self.root / "outputs" / "clip.ja.srt").is_file())
 
+    def test_run_persists_concrete_backend_after_platform_selection(self):
+        for system, machine, backend in [("linux", "x86_64", "faster-whisper"),
+                                         ("darwin", "arm64", "mlx-whisper")]:
+            with self.subTest(system=system), patch("sys.platform", system), patch(
+                    "platform.machine", return_value=machine), patch(
+                    "platform.mac_ver", return_value=("14.0", ("", "", ""), machine)), patch(
+                    "captionweave.cli.create_backend", return_value=object()), patch(
+                    "captionweave.cli.transcribe_media", side_effect=self.fake_transcribe_media) as transcribe:
+                code, _, _ = self.call(["run", str(self.source)])
+            self.assertEqual(code, 0)
+            self.assertEqual(transcribe.call_args.args[2]["backend"], backend)
+
     def test_explicit_output_is_preserved(self):
         output = self.root / "chosen" / "captions.srt"
         with patch("captionweave.cli.create_backend", return_value=object()), patch(

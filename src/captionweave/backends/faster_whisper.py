@@ -1,12 +1,12 @@
 """Faster Whisper adapter; model dependencies are loaded only for recognition."""
-import importlib.metadata
 import os
-import re
 import site
 import sys
 from pathlib import Path
 
 from captionweave.core import SAMPLE_RATE, clip_windows
+from .common import package_versions as inspect_versions, quality_flags
+from . import resolve_backend
 
 
 DLL_HANDLES = []
@@ -15,22 +15,16 @@ PACKAGES = ("faster-whisper", "ctranslate2", "numpy")
 
 
 def package_versions():
-    result = {}
-    for name in PACKAGES:
-        try:
-            result[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            result[name] = None
-    return result
+    return inspect_versions(PACKAGES)
 
 
 def diagnostics():
     return {"backend": "faster-whisper", "packages": package_versions(),
-            "devices": ["cpu", "cuda"], "cuda_runtime": "not_loaded"}
+            "devices": ["cpu"] if sys.platform == "darwin" else ["cpu", "cuda"], "cuda_runtime": "not_loaded"}
 
 
 def configure_gpu_libraries(device, argv=None):
-    if device == "cpu":
+    if device == "cpu" or sys.platform == "darwin":
         return
     paths = []
     for directory in [*site.getsitepackages(), site.getusersitepackages()]:
@@ -53,26 +47,9 @@ def configure_gpu_libraries(device, argv=None):
         os.execve(sys.executable, [sys.executable, "-m", "captionweave", *argv], environment)
 
 
-def quality_flags(row):
-    flags = []
-    if row.get("avg_logprob", 0) < -0.8:
-        flags.append("low_confidence")
-    if row.get("no_speech_prob", 0) > 0.6:
-        flags.append("possible_non_speech")
-    if row.get("compression_ratio", 0) > 2.4:
-        flags.append("repetition")
-    if row["end"] <= row["start"] or row["end"] - row["start"] > 12:
-        flags.append("timing")
-    words = row.get("words") or []
-    if any(right[0] - left[1] > 2 for left, right in zip(words, words[1:])):
-        flags.append("word_timing_gap")
-    if re.search(r"ご視聴ありがとうございました|字幕.*作成|thanks for watching|subscribe to", row["text"], re.I):
-        flags.append("possible_boilerplate")
-    return flags
-
-
 class FasterWhisperBackend:
     def __init__(self, options):
+        resolve_backend("faster-whisper", options["device"])
         self.options = dict(options)
         self.model = None
         self.pipeline = None
@@ -95,7 +72,7 @@ class FasterWhisperBackend:
         from faster_whisper import BatchedInferencePipeline, WhisperModel
         device = self.options["device"]
         if device == "auto":
-            device = "cuda" if ctranslate2.get_cuda_device_count() else "cpu"
+            device = "cuda" if sys.platform != "darwin" and ctranslate2.get_cuda_device_count() else "cpu"
         compute = self.options["compute_type"] or ("float16" if device == "cuda" else "int8")
         print(f"Loading {self.options['model']} on {device} ({compute})", flush=True)
         self.model = WhisperModel(self.options["model"], device=device, compute_type=compute,
