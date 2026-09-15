@@ -17,6 +17,15 @@ Use an arm64 terminal and Python, rather than a Python running under Rosetta. `d
 
 `.[asr]` installs both MLX and faster-whisper on Apple Silicon if CPU fallback is also needed. With that extra, `--device cpu` selects CPU explicitly. If Metal is unavailable, the CLI reports the error and recommends CPU; it does not silently change engines.
 
+For an older macOS installation, use the CPU-only extra so the installer does not request incompatible MLX wheels:
+
+```sh
+.venv/bin/python -m pip install -e '.[cpu]'
+.venv/bin/captionweave run lecture.mp4 --device cpu
+```
+
+Do not use `.[asr]` on an Apple Silicon Mac running macOS older than 14: that extra includes MLX. Intel Macs can use either `.[cpu]` or `.[asr]`.
+
 ## Recognize and review
 
 ```sh

@@ -4,6 +4,10 @@ import sys
 from typing import Protocol
 
 
+BACKENDS = ("auto", "faster-whisper", "mlx-whisper")
+DEVICES = ("auto", "cpu", "cuda", "metal")
+
+
 class Backend(Protocol):
     language: str | None
     actual_device: str | None
@@ -21,9 +25,9 @@ def metal_platform_supported():
 
 
 def resolve_backend(name="auto", device="auto"):
-    if name not in {"auto", "faster-whisper", "mlx-whisper"}:
+    if name not in BACKENDS:
         raise ValueError(f"Unknown ASR backend: {name}")
-    if device not in {"auto", "cpu", "cuda", "metal"}:
+    if device not in DEVICES:
         raise ValueError(f"Unknown ASR device: {device}")
     if sys.platform == "darwin" and device == "cuda":
         raise ValueError("CUDA is not supported on macOS; use metal on Apple Silicon or cpu")

@@ -18,7 +18,7 @@ PRIVATE_NAMES = {"transcript.json", "manifest.json", "ledger.json", "quality.jso
 BINARY_SUFFIXES = {
     ".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".flv", ".wav", ".mp3",
     ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".bin", ".onnx",
-    ".safetensors", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".pyc", ".pyo",
+    ".safetensors", ".npz", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".pyc", ".pyo",
 }
 PATTERNS = {
     "absolute home-directory path": re.compile(r"/(?:home|Users)/[^/\s<>\"']+|[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s<>\"']+"),

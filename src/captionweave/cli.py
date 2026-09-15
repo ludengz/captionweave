@@ -8,7 +8,7 @@ from pathlib import Path
 
 from captionweave.subtitles import (export_requests, import_response, language_tag, load_transcript,
                                    render_job, select_review_segments)
-from captionweave.backends import create_backend, diagnostics, prepare_runtime, resolve_backend
+from captionweave.backends import BACKENDS, DEVICES, create_backend, diagnostics, prepare_runtime, resolve_backend
 from captionweave.core import (MEDIA_EXTENSIONS, atomic_json, digest, job_lock, probe_media,
                              read_json, transcribe_media)
 from captionweave.recheck import load_recheck_evidence, recheck_audio, window_evidence
@@ -115,11 +115,11 @@ def build_parser():
     run.add_argument("--work-dir", default=str(Path.cwd() / ".captionweave" / "jobs"))
     run.add_argument("--recursive", action="store_true")
     run.add_argument("--model", default="large-v3")
-    run.add_argument("--backend", choices=["auto", "faster-whisper", "mlx-whisper"], default="auto",
+    run.add_argument("--backend", choices=BACKENDS, default="auto",
                      help="ASR backend (default: auto; MLX/Metal on supported Apple Silicon Macs)")
     run.add_argument("--language", default="auto", help="Source language code, or auto (default: auto)")
     run.add_argument("--target-language", "--target", dest="target", type=language_tag)
-    run.add_argument("--device", choices=["auto", "cuda", "cpu", "metal"], default="auto")
+    run.add_argument("--device", choices=DEVICES, default="auto")
     run.add_argument("--compute-type", default=None)
     run.add_argument("--batch-size", type=int, default=8,
                      help="Faster-whisper batch size; MLX processes windows serially")
@@ -163,9 +163,9 @@ def build_parser():
                          help="Export review translations in this language (default: job target, if any)")
     recheck.add_argument("--language", type=language_tag, help="Override the source language for this recheck")
     recheck.add_argument("--model", help="Override the job's ASR model")
-    recheck.add_argument("--backend", choices=["auto", "faster-whisper", "mlx-whisper"],
+    recheck.add_argument("--backend", choices=BACKENDS,
                          help="Override the job's backend for this evidence pass")
-    recheck.add_argument("--device", choices=["auto", "cuda", "cpu", "metal"], default="auto")
+    recheck.add_argument("--device", choices=DEVICES, default="auto")
     recheck.add_argument("--compute-type")
     recheck.add_argument("--offline", action="store_true", default=None, help="Use cached models only (inherits job setting)")
     recheck.add_argument("--context", type=float, default=5, help="Surrounding audio in seconds (0-15, default: 5)")

@@ -38,6 +38,8 @@ captionweave doctor
 
 `python -m captionweave` is equivalent to the installed `captionweave` command. A base installation with `python -m pip install .` supports the translation exchange and rendering commands without installing a recognition model or NumPy. Recognition models may download on first use. `--offline` restricts recognition to already cached models.
 
+On Apple Silicon running macOS older than 14, install `.[cpu]` instead of `.[asr]` or `.[metal]`, then use `--device cpu`. The CPU extra omits MLX, whose current wheels require macOS 14+. It also works for a CPU-only installation on other platforms.
+
 `--backend auto` selects MLX/Metal on Apple Silicon with native arm64 Python and macOS 14+, faster-whisper/CPU on other Macs, and faster-whisper/CPU or NVIDIA CUDA elsewhere. `.[asr]` includes MLX dependencies on Apple Silicon as well as the CPU fallback. The smaller `.[metal]` extra installs only the Metal recognition stack. See the [Apple Silicon guide](apple-silicon.md) for setup and a hardware smoke test.
 
 Use `--device cpu` to force faster-whisper CPU with automatic backend selection, or `--device metal` to require MLX/Metal. Explicit `--backend faster-whisper` and `--backend mlx-whisper` select an engine directly. CUDA is rejected on macOS. Unsupported combinations fail with guidance; missing Metal support or dependencies do not silently fall back to CPU. `doctor` reports the selected backend and package versions while leaving GPU runtimes unloaded, so it does not prove that inference will succeed.

@@ -19,6 +19,7 @@ class ReleaseAuditTests(unittest.TestCase):
             ("README.md", ("/" + "home" + "/example-user/video.mp4").encode()),
             ("config.py", ("secret = 'sk-" + "a" * 32 + "'").encode()),
             ("media/video.mp4", b"video"),
+            ("weights.npz", b"synthetic weights"),
             ("private/transcript.json", b"{}"),
         ]
         for name, content in cases:

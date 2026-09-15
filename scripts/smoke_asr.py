@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from captionweave.backends import resolve_backend
+from captionweave.backends import BACKENDS, DEVICES, resolve_backend
 from captionweave.core import atomic_json, read_json, wav_duration
 
 
@@ -141,8 +141,8 @@ def smoke(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=["auto", "faster-whisper", "mlx-whisper"], default="auto")
-    parser.add_argument("--device", choices=["auto", "cpu", "cuda", "metal"], default="auto")
+    parser.add_argument("--backend", choices=BACKENDS, default="auto")
+    parser.add_argument("--device", choices=DEVICES, default="auto")
     parser.add_argument("--model", default="tiny")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--voice", default="Samantha", help="Installed macOS say voice for the English fixture")

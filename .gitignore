@@ -41,6 +41,7 @@ transcripts/
 *.bin
 *.onnx
 *.safetensors
+*.npz
 *.pt
 *.pth
 *.ckpt
