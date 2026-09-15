@@ -20,6 +20,8 @@ captionweave run lecture.mp4 --language auto --target zh
 
 Transcribes speech locally. Your assistant translates it to Chinese.
 
+Runs on CPU, NVIDIA CUDA, or [Apple Silicon with Metal](docs/apple-silicon.md).
+
 ## Translate
 
 Ask Codex, Claude, Kimi, or another assistant with local file access:

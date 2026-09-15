@@ -38,6 +38,8 @@ Tests must be deterministic and must not require credentials, a model service, m
 
 For changes to recognition or media alignment, add a small real CPU or GPU smoke test when the relevant runtime is available. Compare the selected playback interval, extracted duration, recognition timing, and output report. State exactly what was exercised and what remains unverified. A dependency check or mock-backed test does not establish model inference quality.
 
+`python scripts/smoke_asr.py --device cpu --model small` runs that workflow on synthetic speech; on supported Apple Silicon use `--device metal --model tiny`, followed by the intended model. Use `--offline` once its weights are cached. The script uses macOS `say` or FFmpeg's `flite` filter, preserves its artifacts under a new temporary directory, and verifies word timing, original/gain evidence, checkpoint reuse, and source immutability. It is separate from the deterministic unit suite and may download model weights. See [Metal verification](docs/apple-silicon.md#verify-metal-on-your-mac).
+
 ## Change boundaries
 
 - Preserve playback timestamps, stable source identity, validated checkpoints, and complete translation dispositions.
