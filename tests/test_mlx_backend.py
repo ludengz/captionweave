@@ -117,8 +117,9 @@ class MlxBackendTests(unittest.TestCase):
             with self.subTest(available=available), self.runtime(metal=available, evaluate=evaluate), patch.dict(
                     sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=Mock(side_effect=AssertionError))}):
                 backend = self.backend()
-                with self.assertRaisesRegex(RuntimeError, "Metal"):
+                with self.assertRaisesRegex(RuntimeError, "Metal") as raised:
                     backend.load()
+                self.assertIn("No GPU device" if available else "without Metal", str(raised.exception))
                 self.assertIsNone(backend.actual_device)
 
     def test_full_coverage_windows_and_flagged_recheck_keep_absolute_timeline(self):

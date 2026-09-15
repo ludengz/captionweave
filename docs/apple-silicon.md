@@ -55,11 +55,13 @@ Then verify the model you intend to use:
 .venv/bin/python scripts/smoke_asr.py --device metal --model large-v3
 ```
 
-The test uses the installed macOS `Samantha` voice to generate two short English sentences. If that voice is unavailable, select an installed English voice with `--voice` (`say -v '?'` lists voices). It creates a new temporary directory and retains its synthetic audio, jobs, subtitles, and `smoke-report.json` for inspection.
+The test uses the installed macOS `Samantha` voice to generate two short English sentences. If that voice is unavailable, select an installed English voice with `--voice` (`say -v '?'` lists voices). It creates a new temporary directory and retains its synthetic audio, jobs, subtitles, CLI stdout/stderr logs, and `smoke-report.json` for inspection. Errors retain the underlying Metal initialization or CLI failure message. Reports include Python and recognition dependency versions.
 
 A passing JSON result reports `backend: "mlx-whisper"` and `device: "metal"`. The test checks actual inference with word timestamps, a nonzero playback offset spanning two recognition windows, original/gain contextual evidence, cached rechecks, unchanged source/transcript hashes, and rendered artifacts. The synthetic word-error rate is a small smoke-test guard, not a general accuracy benchmark or manual listening audit.
 
 Normal macOS CI validates deterministic backend contracts, dependency installation, and packaging. It does not establish that a physical Metal GPU can execute the model. A real result from this script is required before reporting hardware inference as verified.
+
+For a fresh coding-assistant session on the Mac, the [validation handoff](handoffs/macos-metal-validation.md) records the implementation decisions, checks already performed, remaining hardware evidence, and locations to inspect if a test fails.
 
 ## Implementation references
 

@@ -18,15 +18,19 @@ START = 5.125
 DURATION = 40
 
 
-def run_command(arguments):
+def run_command(arguments, log_prefix=None):
     result = subprocess.run([str(value) for value in arguments], capture_output=True, text=True)
+    if log_prefix is not None:
+        Path(f"{log_prefix}.stdout.log").write_text(result.stdout, encoding="utf-8")
+        Path(f"{log_prefix}.stderr.log").write_text(result.stderr, encoding="utf-8")
     if result.returncode:
-        raise RuntimeError(f"{arguments[0]} exited {result.returncode}: {result.stderr.strip()}")
+        details = "\n".join(value.strip() for value in [result.stdout, result.stderr] if value.strip())
+        raise RuntimeError(f"{arguments[0]} exited {result.returncode}: {details}")
     return result.stdout
 
 
-def cli(*arguments):
-    return json.loads(run_command([sys.executable, "-m", "captionweave", *arguments]))
+def cli(*arguments, log_prefix=None):
+    return json.loads(run_command([sys.executable, "-m", "captionweave", *arguments], log_prefix=log_prefix))
 
 
 def fingerprint(path):
@@ -83,7 +87,7 @@ def smoke(args):
         runtime.append("--offline")
     run_args = ["run", media, *runtime, "--language", "en", "--start", str(START),
                 "--duration", str(DURATION), "--work-dir", root / "jobs", "--output-dir", root / "outputs"]
-    result = cli(*run_args)["results"][0]
+    result = cli(*run_args, log_prefix=root / "run")["results"][0]
     job = Path(result["job"])
     manifest = read_json(job / "manifest.json")
     transcript = read_json(job / "transcript.json")
@@ -110,17 +114,17 @@ def smoke(args):
     immutable = {path: fingerprint(job / path) for path in ["transcript.json", "aligned.wav"]}
     ids = [row["id"] for row in transcript["segments"]]
     check_args = ["recheck", job, *runtime, "--ids", *ids]
-    first = cli(*check_args)
-    repeat = cli(*check_args)
+    first = cli(*check_args, log_prefix=root / "recheck")
+    repeat = cli(*check_args, log_prefix=root / "cached-recheck")
     if first["created_passes"] < 1 or repeat["created_passes"] or repeat["cached_passes"] != len(first["recheck_files"]):
         raise RuntimeError("Contextual recheck checkpoints did not resume")
     if not all(any(read_json(path)["segments"] for path in first["recheck_files"]
                    if read_json(path)["identity"]["method"] == method) for method in ["original", "gain"]):
         raise RuntimeError("Original/gain rechecks did not both produce speech evidence")
-    review = cli("review", job, "--ids", *ids)
+    review = cli("review", job, "--ids", *ids, log_prefix=root / "review")
     if not review["recheck_context"]:
         raise RuntimeError("Contextual evidence was not exposed for review")
-    resumed = cli(*run_args)["results"][0]
+    resumed = cli(*run_args, log_prefix=root / "resume")["results"][0]
     if Path(resumed["job"]) != job:
         raise RuntimeError("Recognition did not resume the original job")
     if fingerprint(media) != media_digest or any(fingerprint(job / path) != value for path, value in immutable.items()):
@@ -129,7 +133,9 @@ def smoke(args):
     if not report["structural_validation_passed"] or not all(Path(name).is_file() for name in report["files"]):
         raise RuntimeError("Rendered artifacts failed structural validation")
     result = {"status": "passed", "backend": backend, "device": manifest["actual_device"],
-              "model": args.model, "processed_interval": [START, START + DURATION],
+              "model": args.model, "model_source": manifest["identity"]["backend"].get("model_source", args.model),
+              "python_version": sys.version.split()[0], "runtime_versions": manifest["identity"]["backend"]["versions"],
+              "processed_interval": [START, START + DURATION],
               "recognized_text": text, "synthetic_word_error_rate": round(error_rate, 4),
               "source_segments": len(ids), "recheck_passes": first["created_passes"],
               "cached_passes": repeat["cached_passes"], "source_and_transcript_unchanged": True,

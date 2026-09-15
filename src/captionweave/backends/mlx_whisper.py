@@ -77,7 +77,8 @@ class MlxWhisperBackend:
             with mx.stream(mx.gpu):
                 mx.eval(mx.array([1.0], dtype=mx.float32) + 1)
         except RuntimeError as error:
-            raise RuntimeError("Metal GPU execution is unavailable; use --backend faster-whisper --device cpu") from error
+            raise RuntimeError(f"Metal GPU execution is unavailable: {error}; "
+                               "use --backend faster-whisper --device cpu") from error
         path = Path(self.model_source)
         if not path.is_dir():
             from huggingface_hub import snapshot_download
